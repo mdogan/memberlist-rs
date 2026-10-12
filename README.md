@@ -48,9 +48,20 @@ async fn main() -> Result<(), memberlist::Error> {
 ## Building and testing
 
 ```
-cargo build
-cargo test
+make build          # debug build
+make release        # release build
+make test           # all tests
+make test-unit      # unit tests only
+make test-interop   # Go interop tests only
+make lint           # clippy, warnings are errors
+make fmt            # format the code
+make check          # fmt, lint and test
 ```
+
+The targets are thin wrappers around `cargo`, so `cargo build` and `cargo test` work too. Run `make help` to list all targets.
+
+The interop tests start real Go memberlist nodes, so they need the Go toolchain. They are skipped when the `go` command is not found.
+The first run downloads `hashicorp/memberlist`, so it needs network access.
 
 All tests bind to `127.0.0.1` only.
 
