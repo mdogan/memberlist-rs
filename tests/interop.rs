@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use memberlist::{Config, Delegate, Memberlist, Node, PingDelegate};
+use memberlist_rs::{Config, Delegate, Memberlist, Node, PingDelegate};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 

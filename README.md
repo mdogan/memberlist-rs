@@ -11,10 +11,10 @@ Encryption is not supported. A Rust member cannot join a cluster that uses encry
 ## Usage
 
 ```rust
-use memberlist::{Config, Memberlist};
+use memberlist_rs::{Config, Memberlist};
 
 #[tokio::main]
-async fn main() -> Result<(), memberlist::Error> {
+async fn main() -> Result<(), memberlist_rs::Error> {
     // Create the initial memberlist from a safe configuration.
     let list = Memberlist::create(Config::default_local()).await?;
 
