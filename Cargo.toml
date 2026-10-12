@@ -1,0 +1,29 @@
+[package]
+name = "memberlist"
+version = "0.7.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "Cluster membership and failure detection using a gossip based protocol (Rust port of hashicorp/memberlist)"
+readme = "README.md"
+
+[dependencies]
+async-trait = "0.1.92"
+bytes = "1.12.1"
+crc32fast = "1.5.2"
+gethostname = "1.1.0"
+if-addrs = "0.15.0"
+ipnet = "2.12.2"
+metrics = "0.24.6"
+parking_lot = "0.12.5"
+rand = "0.10.3"
+socket2 = "0.6.5"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["net", "time", "sync", "rt", "macros", "io-util"] }
+tokio-util = "0.7.20"
+tracing = "0.1.44"
+weezl = "0.2.1"
+
+[dev-dependencies]
+metrics-util = "0.20.4"
+tokio = { version = "1.53.2", features = ["full"] }
+tracing-subscriber = "0.3.23"

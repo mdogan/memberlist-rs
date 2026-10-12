@@ -1,0 +1,119 @@
+package memberlist
+
+import (
+	"bytes"
+	"encoding/hex"
+	"fmt"
+	"hash/crc32"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/hashicorp/go-msgpack/v2/codec"
+)
+
+func lcgBytes(n int, seed uint32) []byte {
+	out := make([]byte, n)
+	x := seed
+	for i := range out {
+		x = x*1103515245 + 12345
+		out[i] = byte(x >> 16)
+	}
+	return out
+}
+
+func patBytes(n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = byte('a' + i%26)
+	}
+	return out
+}
+
+func TestZZGolden(t *testing.T) {
+	var sb strings.Builder
+	emit := func(name string, b []byte) {
+		if len(b) <= 600 {
+			fmt.Fprintf(&sb, "%s\t%s\n", name, hex.EncodeToString(b))
+		} else {
+			fmt.Fprintf(&sb, "%s\tcrc:%08x:%d\n", name, crc32.ChecksumIEEE(b), len(b))
+		}
+	}
+	enc := func(name string, mt messageType, v any) {
+		buf, err := encode(mt, v, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		emit(name, buf.Bytes())
+	}
+	raw := func(name string, v any) {
+		buf := bytes.NewBuffer(nil)
+		hd := codec.MsgpackHandle{}
+		if err := codec.NewEncoder(buf, &hd).Encode(v); err != nil {
+			t.Fatal(err)
+		}
+		emit(name, buf.Bytes())
+	}
+
+	enc("ping_min", pingMsg, &ping{SeqNo: 1, Node: "n1"})
+	enc("ping_full", pingMsg, &ping{SeqNo: 4000000000, Node: "node-b", SourceAddr: []byte{10, 0, 0, 1}, SourcePort: 7946, SourceNode: "node-a"})
+	enc("ping_empty", pingMsg, &ping{})
+	enc("indirect_min", indirectPingMsg, &indirectPingReq{SeqNo: 200, Target: []byte{127, 0, 0, 1}, Port: 80, Node: "x"})
+	enc("indirect_full", indirectPingMsg, &indirectPingReq{SeqNo: 70000, Target: []byte{127, 0, 0, 1}, Port: 65535, Node: "x", Nack: true, SourceAddr: lcgBytes(16, 7), SourcePort: 1, SourceNode: "src"})
+	enc("ack_nil", ackRespMsg, &ackResp{SeqNo: 42})
+	enc("ack_empty", ackRespMsg, &ackResp{SeqNo: 42, Payload: []byte{}})
+	enc("ack_payload", ackRespMsg, &ackResp{SeqNo: 255, Payload: []byte("hello")})
+	enc("nack", nackRespMsg, &nackResp{SeqNo: 256})
+	enc("err", errMsg, &errResp{Error: "boom"})
+	enc("suspect", suspectMsg, &suspect{Incarnation: 3, Node: "a", From: "b"})
+	enc("dead", deadMsg, &dead{Incarnation: 65536, Node: "a", From: "a"})
+	enc("alive_min", aliveMsg, &alive{Incarnation: 1, Node: "a", Addr: []byte{127, 0, 0, 1}, Port: 7946})
+	enc("alive_full", aliveMsg, &alive{Incarnation: 128, Node: "node-with-a-name-longer-than-31-bytes", Addr: lcgBytes(16, 3), Port: 127, Meta: []byte("meta"), Vsn: []uint8{1, 5, 2, 0, 0, 0}})
+	raw("pp_header_0", &pushPullHeader{})
+	raw("pp_header_1", &pushPullHeader{Nodes: 127, UserStateLen: 128, Join: true})
+	raw("pp_header_2", &pushPullHeader{Nodes: 32767, UserStateLen: 32768, Join: false})
+	raw("pp_header_3", &pushPullHeader{Nodes: 2147483647, UserStateLen: 2147483648})
+	raw("pp_header_neg", &pushPullHeader{Nodes: -1, UserStateLen: -33})
+	raw("pp_header_neg2", &pushPullHeader{Nodes: -129, UserStateLen: -32769})
+	raw("user_header", &userMsgHeader{UserMsgLen: 300})
+	raw("push_node_min", &pushNodeState{Name: "a", Addr: []byte{1, 2, 3, 4}, Port: 1})
+	raw("push_node_full", &pushNodeState{Name: "a", Addr: []byte{1, 2, 3, 4}, Port: 7946, Meta: []byte{0xff}, Incarnation: 9, State: StateLeft, Vsn: []uint8{1, 5, 2, 0, 0, 0}})
+	enc("compress", compressMsg, &compress{Algo: lzwAlgo, Buf: []byte{1, 2, 3}})
+
+	for _, n := range []int{0, 1, 31, 32, 255, 256, 65535, 65536} {
+		enc(fmt.Sprintf("err_len_%d", n), errMsg, &errResp{Error: string(patBytes(n))})
+		enc(fmt.Sprintf("ack_len_%d", n), ackRespMsg, &ackResp{SeqNo: 1, Payload: patBytes(n)})
+	}
+
+	// compound
+	emit("compound", makeCompoundMessage([][]byte{[]byte("abc"), {}, []byte("defgh")}).Bytes())
+
+	// labels
+	lb, _ := AddLabelHeaderToPacket([]byte("payload"), "blue")
+	emit("label_packet", lb)
+
+	// LZW
+	lzwCases := map[string][]byte{
+		"empty":  {},
+		"one":    {7},
+		"text":   []byte("TOBEORNOTTOBEORTOBEORNOT"),
+		"zeros":  make([]byte, 5000),
+		"random": lcgBytes(40000, 99),
+		"mixed":  append(lcgBytes(30000, 5), patBytes(60000)...),
+	}
+	for _, name := range []string{"empty", "one", "text", "zeros", "random", "mixed"} {
+		buf, err := compressPayload(lzwCases[name], false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// buf is [compressMsg][msgpack compress{}]; keep the whole thing.
+		if err := os.WriteFile("testdata/lzw_"+name+".bin", buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		emit("lzw_"+name, buf.Bytes())
+	}
+
+	if err := os.WriteFile("testdata/golden.txt", []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
